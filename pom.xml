@@ -10,7 +10,7 @@
     </parent>
     <artifactId>hzero-admin-saas</artifactId>
     <name>hzero-admin-saas</name>
-    <version>1.4.2.RELEASE</version>
+    <version>1.4.3.RELEASE</version>
 
     <dependencies>
         <!-- hzero starter -->
