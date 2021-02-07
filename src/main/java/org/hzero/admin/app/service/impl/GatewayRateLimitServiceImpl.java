@@ -7,6 +7,7 @@ import io.choerodon.core.exception.CommonException;
 import io.choerodon.mybatis.pagehelper.domain.PageRequest;
 import io.choerodon.mybatis.pagehelper.domain.Sort;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.hzero.admin.api.dto.GatewayRateLimitDto;
 import org.hzero.admin.app.service.GatewayRateLimitLineService;
 import org.hzero.admin.app.service.GatewayRateLimitService;
@@ -35,11 +36,7 @@ import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * 网关限流设置应用服务默认实现
@@ -122,10 +119,10 @@ public class GatewayRateLimitServiceImpl extends BaseAppService implements Gatew
         if (limit.judgeUpdateFieldIsUniqueIndex(gatewayRateLimitRepository)) {
             limit.validUniqueIndex(gatewayRateLimitRepository);
         }
-        if (limit.getEnabledFlag() != null && limit.getEnabledFlag() == 0) {
+        if (BaseConstants.Flag.NO.equals(limit.getEnabledFlag())) {
             //禁用时，取消所有子限流
-            insertList.forEach(insert -> insert.setEnabledFlag(0));
-            updateList.forEach(update -> update.setEnabledFlag(0));
+            insertList.forEach(insert -> insert.setEnabledFlag(BaseConstants.Flag.NO));
+            updateList.forEach(update -> update.setEnabledFlag(BaseConstants.Flag.NO));
         }
         gatewayRateLimitRepository.updateByPrimaryKeySelective(limit);
         //更新行
@@ -135,7 +132,7 @@ public class GatewayRateLimitServiceImpl extends BaseAppService implements Gatew
         //如果子限流被禁用，则撤销该限流变更
         List<Long> rollbackRouteIds = new ArrayList<>();
         updateList.forEach(update -> {
-            if (update.getEnabledFlag() != null && update.getEnabledFlag() == 0) {
+            if (BaseConstants.Flag.NO.equals(update.getEnabledFlag())) {
                 rollbackRouteIds.add(update.getServiceRouteId());
             }
         });
@@ -215,31 +212,37 @@ public class GatewayRateLimitServiceImpl extends BaseAppService implements Gatew
         for (GatewayRateLimit gatewayRateLimit : rateLimitList) {
             List<GatewayRateLimit> limitList = gatewayRateLimitRepository.select(gatewayRateLimit);
             for (GatewayRateLimit limitUpdate : limitList) {
-                if (limitUpdate != null && limitUpdate.getEnabledFlag() == 1) {
-                    GatewayRateLimitLine queryParam = new GatewayRateLimitLine();
-                    queryParam.setRateLimitId(limitUpdate.getRateLimitId());
-                    List<GatewayRateLimitLine> lines = gatewayRateLimitLineRepository.select(queryParam);
-                    String rateLimitType = limitUpdate.getRateLimitType();
-                    //step1:匹配路由，将限流配置合并到路由的额外配置(extend_config_map)中
-                    for (GatewayRateLimitLine line : lines) {
-                        merge(line, rateLimitType);
-                    }
+                try {
+                    if (BaseConstants.Flag.YES.equals(limitUpdate.getEnabledFlag())) {
+                        GatewayRateLimitLine queryParam = new GatewayRateLimitLine();
+                        queryParam.setRateLimitId(limitUpdate.getRateLimitId());
+                        queryParam.setEnabledFlag(BaseConstants.Flag.YES);
+                        List<GatewayRateLimitLine> lines = gatewayRateLimitLineRepository.select(queryParam);
+                        String rateLimitType = limitUpdate.getRateLimitType();
+                        //step1:匹配路由，将限流配置合并到路由的额外配置(extend_config_map)中
+                        for (GatewayRateLimitLine line : lines) {
+                            merge(line, rateLimitType);
+                        }
 
-                    //step2:通知网关服务
-                    routeRefreshService.notifyGateway();
+                        //step2:通知网关服务
+                        routeRefreshService.notifyGateway();
 
-                    //设置刷新状态
-                    limitUpdate.setRefreshStatus(1L);
-                } else {
-                    if (limitUpdate == null) {
-                        limitUpdate = new GatewayRateLimit();
+                        //设置刷新状态
+                        limitUpdate.setRefreshStatus(1L);
+                        limitUpdate.setRefreshMessage(null);
+                    } else {
+                        // 未启用
+                        limitUpdate.setRefreshStatus(1L);
+                        limitUpdate.setRefreshMessage(null);
                     }
-                    //远程调用失败
+                } catch (Exception e) {
+                    //处理异常
                     limitUpdate.setRefreshStatus(0L);
-                    limitUpdate.setRefreshMessage(BaseConstants.ErrorCode.ERROR_NET);
+                    limitUpdate.setRefreshMessage(ExceptionUtils.getMessage(e));
+                } finally {
+                    limitUpdate.setRefreshTime(new Date());
+                    feignRecord.add(limitUpdate);
                 }
-                limitUpdate.setRefreshTime(new Date());
-                feignRecord.add(limitUpdate);
             }
         }
         gatewayRateLimitRepository.batchUpdateByPrimaryKey(feignRecord);
@@ -412,7 +415,7 @@ public class GatewayRateLimitServiceImpl extends BaseAppService implements Gatew
     }
 
     private void validateRateLimitDimension(String rateLimitDimension, GatewayRateLimitDimension config) {
-        if (!rateLimitDimension.equals(config.getRateLimitDimension())){
+        if (!rateLimitDimension.equals(config.getRateLimitDimension())) {
             LOGGER.error("The gatewayRateLimitDimension[id={}] is invalid, it may be dirty data, please try to clear it and try again.", config.getRateLimitDimId());
             throw new CommonException("hadm.error.data_error");
         }

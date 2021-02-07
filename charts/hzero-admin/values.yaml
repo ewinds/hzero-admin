@@ -104,6 +104,14 @@ env:
     HZERO_LOV_SQL_ENABLED: true
     # 值集值处理支持
     HZERO_LOV_VALUE_ENABLED: true
+    # admin客户端用户名
+    SPRING_BOOT_ADMIN_CLIENT_USERNAME: admin
+    # admin客户端密码
+    SPRING_BOOT_ADMIN_CLIENT_PASSWORD: admin
+    # spring security用户名
+    SPRING_SECURITY_USER_NAME: admin
+    # spring security密码
+    SPRING_SECURITY_USER_PASSWORD: admin
 
     # 日志级别
     LOG_LEVEL: info

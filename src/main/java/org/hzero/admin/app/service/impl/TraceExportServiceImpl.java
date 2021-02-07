@@ -8,6 +8,8 @@ import org.hzero.admin.app.service.TraceExportService;
 import org.hzero.core.redis.RedisHelper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -23,16 +25,27 @@ public class TraceExportServiceImpl implements TraceExportService {
 
     @Autowired
     private RedisHelper redisHelper;
+    @Autowired(required = false)
+    @Qualifier("tracerRedisTemplate")
+    private RedisTemplate redisTemplate;
 
     @Override
     public List<TraceExport> export(String traceGroupId) {
         String listKey = TraceAnalysisServiceImpl.TRACE_GROUP_KEY_PREFIX + traceGroupId;
-        List<String> logList = redisHelper.lstAll(listKey);
+        List<String> logList = exportDistRedis(listKey);
         if (CollectionUtils.isEmpty(logList)) {
             throw new CommonException("hadm.error.export_empty_log");
         }
         TraceReport report = TraceAnalysisServiceImpl.analysis(traceGroupId, logList);
         return transfer(report);
+    }
+
+    private List<String> exportDistRedis(String listKey) {
+        if (redisTemplate == null) {
+            return redisHelper.lstAll(listKey);
+        } else {
+            return redisTemplate.opsForList().range(listKey, 0L, redisTemplate.opsForList().size(listKey));
+        }
     }
 
     private List<TraceExport> transfer(TraceReport report) {

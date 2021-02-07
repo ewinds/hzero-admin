@@ -5,11 +5,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
+import io.choerodon.core.exception.CommonException;
+import io.choerodon.core.swagger.PermissionData;
+import io.choerodon.core.swagger.SwaggerExtraData;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.collections4.map.MultiKeyMap;
+import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.hzero.admin.api.dto.swagger.*;
 import org.hzero.admin.config.ConfigProperties;
@@ -22,13 +24,14 @@ import org.hzero.admin.infra.util.MyLinkedList;
 import org.hzero.admin.infra.util.VersionUtil;
 import org.hzero.common.HZeroService;
 import org.hzero.core.base.BaseConstants;
+import org.hzero.core.redis.RedisHelper;
+import org.hzero.core.redis.safe.SafeRedisHelper;
 import org.hzero.mybatis.base.impl.BaseRepositoryImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.remoting.RemoteAccessException;
@@ -42,10 +45,6 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-
-import io.choerodon.core.exception.CommonException;
-import io.choerodon.core.swagger.PermissionData;
-import io.choerodon.core.swagger.SwaggerExtraData;
 
 /**
  * 资源库实现
@@ -63,8 +62,6 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
     private static final String TITLE = "title";
     private static final String KEY = "key";
     private static final String CHILDREN = "children";
-    private static final String API_TREE_DOC = "api-tree-doc";
-    private static final String PATH_DETAIL = "swagger:path-detail";
     private static final String COLON = BaseConstants.Symbol.COLON;
     private static final String UNDERLINE = BaseConstants.Symbol.MIDDLE_LINE;
     private static final String SERVICE = "service";
@@ -124,9 +121,9 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
      */
     private final RestTemplate restTemplate;
     /**
-     * RedisTemplate对象
+     * redisHelper
      */
-    private final StringRedisTemplate redisTemplate;
+    private final RedisHelper redisHelper;
     /**
      * 对象映射对象
      */
@@ -144,23 +141,17 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
      */
     private final ServiceRouteRepository serviceRouteRepository;
 
-    /**
-     * 缓存对象
-     */
-    private final Cache<String, String> cache = CacheBuilder.newBuilder()
-            .expireAfterAccess(5, TimeUnit.DAYS).maximumSize(500).build();
-
     @Autowired
     public SwaggerRepositoryImpl(SwaggerMapper swaggerMapper,
                                  RestTemplate restTemplate,
-                                 StringRedisTemplate redisTemplate,
+                                 RedisHelper redisHelper,
                                  ObjectMapper objectMapper,
                                  DiscoveryClient discoveryClient,
                                  ConfigProperties configProperties,
                                  ServiceRouteRepository serviceRouteRepository) {
         this.swaggerMapper = swaggerMapper;
         this.restTemplate = restTemplate;
-        this.redisTemplate = redisTemplate;
+        this.redisHelper = redisHelper;
         this.objectMapper = objectMapper;
         this.discoveryClient = discoveryClient;
         this.configProperties = configProperties;
@@ -266,12 +257,11 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
 
     @Override
     public ControllerDTO queryPathDetail(String serviceName, String version, String controllerName, String operationId) {
-        String key = this.getPathDetailRedisKey(serviceName, version, controllerName, operationId);
-
-        // 判断缓存中是否存在该值
-        Boolean hasKey = this.redisTemplate.hasKey(key);
-        if (Objects.nonNull(hasKey) && Boolean.TRUE.equals(hasKey)) {
-            String value = this.redisTemplate.opsForValue().get(key);
+        // 数据缓存的key
+        String dataCacheKey = this.getPathDetailDataRedisKey(serviceName, version, controllerName, operationId);
+        // 判断缓存中当前缓存是否有效
+        if (this.pathDetailCacheIsEffective(dataCacheKey, serviceName, version)) {
+            String value = this.redisHelper.strGet(dataCacheKey);
             try {
                 return objectMapper.readValue(value, ControllerDTO.class);
             } catch (IOException e) {
@@ -281,7 +271,7 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
         }
 
         try {
-            return this.processPathDetailFromSwagger(serviceName, version, controllerName, operationId, key);
+            return this.processPathDetailFromSwagger(serviceName, version, controllerName, operationId);
         } catch (IOException e) {
             LOGGER.error("fetch swagger json error, service: {}, version: {}, exception: {}", serviceName, version, e.getMessage());
             throw new CommonException("error.service.not.run", serviceName, version);
@@ -374,13 +364,13 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
     /**
      * 处理树型结构的每个版本的节点
      *
-     * @param routeName 路由名称
-     * @param service   服务名称
-     * @param versions  服务版本
-     * @param children  子节点
+     * @param routeName   路由名称
+     * @param serviceName 服务名称
+     * @param versions    服务版本
+     * @param children    子节点
      * @return 版本的个数
      */
-    private int processTreeOnVersionNode(String routeName, String service, Set<String> versions, List<Map<String, Object>> children) {
+    private int processTreeOnVersionNode(String routeName, String serviceName, Set<String> versions, List<Map<String, Object>> children) {
         int versionNum = versions.size();
         for (String version : versions) {
             boolean legalVersion;
@@ -388,9 +378,9 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
             versionMap.put(TITLE, version);
             List<Map<String, Object>> versionChildren = new ArrayList<>();
             versionMap.put(CHILDREN, versionChildren);
-            String apiTreeDocKey = this.getApiTreeDocKey(service, version);
-            if (this.cache.getIfPresent(apiTreeDocKey) != null) {
-                String childrenStr = this.cache.getIfPresent(apiTreeDocKey);
+            if (this.apiTreeCacheIsEffective(serviceName, version)) {
+                String apiTreeDataCacheKey = this.getApiTreeDataCacheKey(serviceName, version);
+                String childrenStr = this.redisHelper.strGet(apiTreeDataCacheKey);
                 try {
                     List<Map<String, Object>> list = this.objectMapper.readValue(childrenStr,
                             new TypeReference<List<Map<String, Object>>>() {
@@ -399,10 +389,10 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
                     legalVersion = true;
                 } catch (IOException e) {
                     LOGGER.error("object mapper read redis cache value {} to List<Map<String, Object>> error, so process children version from db or swagger, exception: {} ", childrenStr, e);
-                    legalVersion = this.processChildrenFromSwaggerJson(routeName, service, version, versionChildren);
+                    legalVersion = this.processChildrenFromSwaggerJson(routeName, serviceName, version, versionChildren);
                 }
             } else {
-                legalVersion = this.processChildrenFromSwaggerJson(routeName, service, version, versionChildren);
+                legalVersion = this.processChildrenFromSwaggerJson(routeName, serviceName, version, versionChildren);
             }
             if (legalVersion) {
                 children.add(versionMap);
@@ -506,24 +496,75 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
             }
         });
 
+        this.cacheApiTreeDoc(service, version, children);
+    }
+
+    /**
+     * 缓存api树结构文档数据
+     *
+     * @param serviceName 服务名
+     * @param version     服务版本
+     * @param children    缓存值
+     */
+    private void cacheApiTreeDoc(String serviceName, String version, Object children) {
         try {
-            String key = this.getApiTreeDocKey(service, version);
             String value = this.objectMapper.writeValueAsString(children);
-            this.cache.put(key, value);
+            this.redisHelper.strSet(this.getApiTreeDataCacheKey(serviceName, version), value, 10, TimeUnit.DAYS);
+            this.redisHelper.strSet(this.getApiTreeRefreshTimeCacheKey(serviceName, version), String.valueOf(System.currentTimeMillis()),
+                    10, TimeUnit.DAYS);
         } catch (JsonProcessingException e) {
             LOGGER.warn("read object to string error while caching to redis, exception", e);
         }
     }
 
     /**
-     * 获取api树结构文档的key
+     * 判断ApiTree缓存是否有效
      *
-     * @param service 服务
-     * @param version 版本
+     * @param serviceName 服务名称
+     * @param version     服务版本
+     * @return true 缓存有效 false 缓存无效
+     */
+    private boolean apiTreeCacheIsEffective(String serviceName, String version) {
+        String apiTreeDataCacheKey = this.getApiTreeDataCacheKey(serviceName, version);
+        if (BooleanUtils.isNotTrue(this.redisHelper.hasKey(apiTreeDataCacheKey))) {
+            return false;
+        }
+
+        // 获取服务swagger文档刷新时间
+        long swaggerRefreshTime = this.getServiceSwaggerRefreshTime(serviceName, version);
+
+        // ApiTree刷新时间
+        long apiTreeRefreshTime = 0L;
+        String apiTreeRefreshTimeCacheKey = this.getApiTreeRefreshTimeCacheKey(serviceName, version);
+        String refreshTime = this.redisHelper.strGet(apiTreeRefreshTimeCacheKey);
+        if (StringUtils.isNotBlank(refreshTime)) {
+            apiTreeRefreshTime = Long.parseLong(refreshTime);
+        }
+
+        // ApiTree刷新时间大于swagger文档刷新时间，才认为缓存有效
+        return apiTreeRefreshTime > swaggerRefreshTime;
+    }
+
+    /**
+     * 获取api树结构文档数据缓存key
+     *
+     * @param serviceName 服务
+     * @param version     版本
      * @return key
      */
-    private String getApiTreeDocKey(String service, String version) {
-        return API_TREE_DOC + COLON + service + COLON + version;
+    private String getApiTreeDataCacheKey(String serviceName, String version) {
+        return String.format("%s:swagger:api-tree-doc:%s:%s:data", HZeroService.Admin.CODE, serviceName, version);
+    }
+
+    /**
+     * 获取api树结构文档刷新时间缓存key
+     *
+     * @param serviceName 服务
+     * @param version     版本
+     * @return key
+     */
+    private String getApiTreeRefreshTimeCacheKey(String serviceName, String version) {
+        return String.format("%s:swagger:api-tree-doc:%s:%s:refresh-time", HZeroService.Admin.CODE, serviceName, version);
     }
 
     /**
@@ -657,17 +698,15 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
     /**
      * 从swagger数据中处理路径的详细数据
      *
-     * @param name           服务
+     * @param serviceName    服务
      * @param version        版本
      * @param controllerName controller名字
      * @param operationId    操作ID
-     * @param key            redis缓存key
      * @return 处理结果的controller数据对象
      * @throws IOException 处理异常
      */
-    private ControllerDTO processPathDetailFromSwagger(String name, String version, String controllerName,
-                                                       String operationId, String key) throws IOException {
-        String json = this.getSwaggerJson(name, version);
+    private ControllerDTO processPathDetailFromSwagger(String serviceName, String version, String controllerName, String operationId) throws IOException {
+        String json = this.getSwaggerJson(serviceName, version);
         if (StringUtils.isBlank(json)) {
             throw new CommonException("error.controller.not.found", controllerName);
         }
@@ -687,42 +726,80 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
         Map<String, String> dtoMap = this.convertMap2JsonWithComments(map);
         JsonNode pathNode = node.get(PATHS);
         String basePath = node.get(BASE_PATH).asText();
-        ControllerDTO controller = this.queryPathDetailByOptions(name, pathNode, targetControllers, operationId, dtoMap, basePath);
-        this.cache2Redis(key, controller);
+        ControllerDTO controller = this.queryPathDetailByOptions(serviceName, pathNode, targetControllers, operationId, dtoMap, basePath);
+        String dataCacheKey = this.getPathDetailDataRedisKey(serviceName, version, controllerName, operationId);
+        this.cachePathDetail(serviceName, version, dataCacheKey, controller);
         return controller;
     }
 
     /**
      * 将数据缓存到redis中
      *
-     * @param key   缓存的key
-     * @param value 缓存的值
+     * @param serviceName 服务名称
+     * @param version     服务版本
+     * @param key         缓存的key
+     * @param value       缓存的值
      */
-    private void cache2Redis(String key, Object value) {
+    private void cachePathDetail(String serviceName, String version, String key, Object value) {
         try {
             //缓存10天
-            this.redisTemplate.opsForValue().set(key, this.objectMapper.writeValueAsString(value), 10, TimeUnit.DAYS);
+            this.redisHelper.strSet(key, this.objectMapper.writeValueAsString(value), 10, TimeUnit.DAYS);
+            this.redisHelper.strSet(this.getPathDetailRefreshTimeRedisKey(serviceName, version), String.valueOf(System.currentTimeMillis()),
+                    10, TimeUnit.DAYS);
         } catch (JsonProcessingException e) {
             LOGGER.warn("read object to string error while caching to redis, exception", e);
         }
     }
 
     /**
-     * 获取路径详情的redis缓存key
+     * 判断PathDetail缓存是否有效
      *
-     * @param name           服务名称
-     * @param version        版本
+     * @param serviceName 服务名称
+     * @param version     服务版本
+     * @return true 缓存有效 false 缓存无效
+     */
+    private boolean pathDetailCacheIsEffective(String dataCacheKey, String serviceName, String version) {
+        if (BooleanUtils.isNotTrue(this.redisHelper.hasKey(dataCacheKey))) {
+            return false;
+        }
+
+        // 获取服务swagger文档刷新时间
+        long swaggerRefreshTime = this.getServiceSwaggerRefreshTime(serviceName, version);
+
+        // 路径详情刷新时间
+        long pathDetailRefreshTime = 0L;
+        String refreshTime = this.redisHelper.strGet(this.getPathDetailRefreshTimeRedisKey(serviceName, version));
+        if (StringUtils.isNotBlank(refreshTime)) {
+            pathDetailRefreshTime = Long.parseLong(refreshTime);
+        }
+
+        // 服务刷新时间大于swagger文档刷新时间，才认为缓存有效
+        return pathDetailRefreshTime > swaggerRefreshTime;
+    }
+
+    /**
+     * 获取路径详情数据的redis缓存key
+     *
+     * @param serviceName    服务名称
+     * @param version        服务版本
      * @param controllerName controller名称
      * @param operationId    操作ID
      * @return 缓存key
      */
-    private String getPathDetailRedisKey(String name, String version, String controllerName, String operationId) {
-        return HZeroService.Admin.CODE + COLON +
-                PATH_DETAIL + COLON +
-                name + COLON +
-                version + COLON +
-                controllerName + COLON +
-                operationId;
+    private String getPathDetailDataRedisKey(String serviceName, String version, String controllerName, String operationId) {
+        return String.format("%s:swagger:path-detail:%s:%s:data:%s:%s", HZeroService.Admin.CODE,
+                serviceName, version, controllerName, operationId);
+    }
+
+    /**
+     * 获取路径详情缓存时间的redis缓存key
+     *
+     * @param serviceName 服务名称
+     * @param version     服务版本
+     * @return 缓存key
+     */
+    private String getPathDetailRefreshTimeRedisKey(String serviceName, String version) {
+        return String.format("%s:swagger:path-detail:%s:%s:refresh-time", HZeroService.Admin.CODE, serviceName, version);
     }
 
     /**
@@ -1253,5 +1330,26 @@ public class SwaggerRepositoryImpl extends BaseRepositoryImpl<Swagger> implement
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> getChildren(Map<String, Object> parent) {
         return (List<Map<String, Object>>) parent.get(CHILDREN);
+    }
+
+    /**
+     * 获取指定服务的swagger文档刷新时间
+     *
+     * @param serviceName 服务名称
+     * @param version     服务版本
+     * @return 服务swagger文档刷新时间
+     */
+    private long getServiceSwaggerRefreshTime(String serviceName, String version) {
+        // 获取服务swagger文档刷新时间
+        return SafeRedisHelper.execute(HZeroService.Swagger.REDIS_DB, () -> {
+            // 获取刷新时间
+            String refreshTime = this.redisHelper.hshGet(String.format("%s:swagger-refresh:service:%s",
+                    HZeroService.Swagger.CODE, serviceName), version);
+            if (StringUtils.isNotBlank(refreshTime)) {
+                return Long.valueOf(refreshTime);
+            } else {
+                return 0L;
+            }
+        });
     }
 }

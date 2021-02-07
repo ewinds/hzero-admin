@@ -13,6 +13,15 @@ public class ConfigProperties {
     static final String PREFIX = "hzero.config";
 
     /**
+     * 可全局刷新缓存的服务
+     */
+    private String[] refreshCacheServices = new String[]{"hzero-platform", "hzero-iam"};
+    /**
+     * 管理端口令牌
+     */
+    private String managementToken = "JWBJOFGMQPKZFHW4RAKD0DUQNSZSEVOCP8TYMIC29YLE1LH7URNV5XBX63IATGSK";
+
+    /**
      * 跳过刷新服务路由的服务
      */
     private Route route = new Route();
@@ -58,5 +67,21 @@ public class ConfigProperties {
 
     public void setRoute(Route route) {
         this.route = route;
+    }
+
+    public String[] getRefreshCacheServices() {
+        return refreshCacheServices;
+    }
+
+    public void setRefreshCacheServices(String[] refreshCacheServices) {
+        this.refreshCacheServices = refreshCacheServices;
+    }
+
+    public String getManagementToken() {
+        return managementToken;
+    }
+
+    public void setManagementToken(String managementToken) {
+        this.managementToken = managementToken;
     }
 }

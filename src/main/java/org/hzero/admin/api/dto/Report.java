@@ -1,5 +1,6 @@
 package org.hzero.admin.api.dto;
 
+import org.hzero.core.message.MessageAccessor;
 import org.springframework.util.CollectionUtils;
 
 import java.util.HashMap;
@@ -30,16 +31,14 @@ public class Report {
     private String merge(Map<String, String> instanceErrorMessages) {
         StringBuilder builder = new StringBuilder();
         int sum = instanceErrorMessages.size();
-        builder.append("Summary[")
-                .append(sum)
-                .append("] instances notify failed.\n ");
+        builder.append(MessageAccessor.getMessage("hadm.error.maintain_rule_push_failed_sum", new Object[]{sum}).desc());
+        builder.append("\n");
+        builder.append(MessageAccessor.getMessage("hadm.error.maintain_rule_push_failed_tips").desc());
+        builder.append("\n");
         for (Map.Entry<String, String> entry : instanceErrorMessages.entrySet()) {
-            builder.append("instance [host = ")
-                    .append(entry.getKey())
-                    .append("] ")
-                    .append("cause [ ")
-                    .append(entry.getValue())
-                    .append(" ].")
+            builder
+                    .append(" - ")
+                    .append(MessageAccessor.getMessage("hadm.error.maintain_rule_push_failed", new Object[]{entry.getKey()}).desc())
                     .append("\n ");
         }
         return builder.toString();

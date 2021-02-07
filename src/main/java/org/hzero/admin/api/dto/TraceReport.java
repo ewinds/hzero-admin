@@ -224,7 +224,7 @@ public class TraceReport {
 
         public void setTimestamp(Long timestamp) {
             this.timestamp = timestamp;
-            this.logDate = DateFormatUtils.format(timestamp, "yyyy-MM-dd hh:mm:ss");
+            this.logDate = DateFormatUtils.format(timestamp, "yyyy-MM-dd HH:mm:ss");
         }
 
         public String getLogDate() {

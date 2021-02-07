@@ -11,7 +11,7 @@ import org.hzero.export.annotation.ExcelSheet;
 @ExcelSheet(zh = "日志追溯分析报告", en = "Trace log analysis report")
 public class TraceExport {
 
-    @ExcelColumn(zh = "时间戳", en = "Timestamp")
+//    @ExcelColumn(zh = "时间戳", en = "Timestamp")
     private Long timestamp;
     @ExcelColumn(zh = "记录时间", en = "Log Date")
     private String logDate;

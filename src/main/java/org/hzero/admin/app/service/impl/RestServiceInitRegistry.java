@@ -2,6 +2,7 @@ package org.hzero.admin.app.service.impl;
 
 import org.hzero.admin.api.dto.ServiceRegistryResponse;
 import org.hzero.admin.app.service.ServiceInitRegistry;
+import org.hzero.admin.config.ServiceInitRegistryProperties;
 import org.hzero.admin.domain.repository.ServiceInitRegistryRepository;
 import org.hzero.admin.domain.vo.InitChainContext;
 import org.hzero.admin.domain.vo.Service;
@@ -12,14 +13,17 @@ import org.hzero.core.util.ServiceInstanceUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.actuate.health.Status;
 import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.context.SmartLifecycle;
+import org.springframework.expression.EvaluationContext;
+import org.springframework.expression.ExpressionParser;
+import org.springframework.expression.spel.standard.SpelExpressionParser;
+import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestTemplate;
 
@@ -58,19 +62,14 @@ public class RestServiceInitRegistry implements ServiceInitRegistry, SmartLifecy
     private InitChainFactoryBean chainFactoryBean;
     @Autowired
     private DiscoveryClient discoveryClient;
-
-    @Value("${hzero.service-init-registry.health-check.connect-timeout:3000}")
-    private int healthCheckConnectTimeout = 3000;
-    @Value("${hzero.service-init-registry.health-check.read-timeout:6000}")
-    private int healthCheckReadTimeout = 6000;
-
+    @Autowired
+    private ServiceInitRegistryProperties properties;
+    @Qualifier("serviceInitRegistryRestTemplate")
+    @Autowired
     private RestTemplate restTemplate;
-    {
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(healthCheckConnectTimeout);
-        requestFactory.setReadTimeout(healthCheckReadTimeout);
-        restTemplate = new RestTemplate(requestFactory);
-    }
+
+    private ThreadLocal<EvaluationContext> contextThreadLocal = ThreadLocal.withInitial(StandardEvaluationContext::new);
+    private ThreadLocal<ExpressionParser> parserThreadLocal = ThreadLocal.withInitial(SpelExpressionParser::new);
 
     private final Lock lock = new ReentrantLock();
     private final Condition empty = lock.newCondition();
@@ -213,7 +212,7 @@ public class RestServiceInitRegistry implements ServiceInitRegistry, SmartLifecy
             assertHealth(service);
             serviceInitRegistryRepository.add(service);
         } catch (Throwable e) {
-            LOGGER.info("service register error, cause: {}", e.getMessage());
+            LOGGER.error("service register error, cause: {}", e.getMessage());
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("register ex: ", e);
             }
@@ -258,7 +257,7 @@ public class RestServiceInitRegistry implements ServiceInitRegistry, SmartLifecy
         try {
             serviceInitRegistryRepository.remove(service);
         } catch (Throwable e) {
-            LOGGER.info("service unregister error, cause: {}", e.getMessage());
+            LOGGER.error("service unregister error, cause: {}", e.getMessage());
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("unregister ex: ", e);
             }
@@ -296,6 +295,24 @@ public class RestServiceInitRegistry implements ServiceInitRegistry, SmartLifecy
             throw new RuntimeException("service [" + service.getServiceName() + ":" + service.getVersion() + "] doInit() failed, cause: " + e.getMessage(), e);
         }
         return true;
+    }
+
+    @Override
+    public boolean shouldSkip(Service service) {
+        if (StringUtils.isEmpty(properties.getSkipExpression())) {
+            return false;
+        }
+        EvaluationContext context = this.contextThreadLocal.get();
+        ExpressionParser parser = this.parserThreadLocal.get();
+        context.setVariable("service", service);
+        Boolean b = parser.parseExpression(properties.getSkipExpression()).getValue(context, Boolean.class);
+        return b == null ? false : b;
+    }
+
+    @Override
+    public void skip(Service service) {
+        service.setInitialized(true);
+        setInitialized(service);
     }
 
     /**

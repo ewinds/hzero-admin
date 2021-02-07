@@ -1,7 +1,6 @@
 package org.hzero.admin.api.controller.v1
 
-import org.hzero.admin.api.controller.v1.ConfigSiteController
-import org.hzero.admin.api.controller.v1.ControllerSpec
+
 import org.hzero.admin.domain.entity.HService
 import org.hzero.admin.domain.entity.ServiceConfig
 import org.hzero.admin.domain.repository.ServiceConfigRepository

@@ -62,6 +62,10 @@ public interface ServiceInitRegistry {
         boolean success = true;
         for (Service service : services) {
             try {
+                if (shouldSkip(service)) {
+                    skip(service);
+                    continue;
+                }
                 init(service);
             } catch (RuntimeException e) {
                 success = false;
@@ -85,6 +89,10 @@ public interface ServiceInitRegistry {
      * @throws RuntimeException
      */
     boolean doInit(Service service) throws RuntimeException;
+
+    boolean shouldSkip(Service service);
+
+    void skip(Service service);
 
     /**
      * 更新服务标识，标记为已初始化状态

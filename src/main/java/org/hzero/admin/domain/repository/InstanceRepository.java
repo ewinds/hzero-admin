@@ -1,10 +1,11 @@
 package org.hzero.admin.domain.repository;
 
-import io.choerodon.core.domain.Page;
-import io.choerodon.mybatis.pagehelper.domain.PageRequest;
 import org.hzero.admin.api.dto.InstanceDTO;
 import org.hzero.admin.api.dto.InstanceDetailDTO;
 import org.hzero.admin.api.dto.condition.InstanceQueryDTO;
+
+import io.choerodon.core.domain.Page;
+import io.choerodon.mybatis.pagehelper.domain.PageRequest;
 
 /**
  * 服务实例资源库接口
@@ -25,8 +26,8 @@ public interface InstanceRepository {
     /**
      * 按条件查询满足条件的实例对象
      *
-     * @param service 服务名称
-     * @param version 版本
+     * @param service     服务名称
+     * @param version     版本
      * @param pageRequest 分页
      * @return 查询到的实例数据
      */

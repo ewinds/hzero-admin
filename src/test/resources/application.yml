@@ -35,7 +35,7 @@ spring:
     # 启用缓存
     chain.cache: true
 
-server:
+server: 
   undertow:
     # 设置IO线程数, 它主要执行非阻塞的任务,它们会负责多个连接
     # 默认值为8，建议设置每个CPU核心一个线程
@@ -93,12 +93,12 @@ server:
     max-connections: ${SERVER_TOMCAT_MAX_CONNECTIONS:10000}
     # 阻塞队列大小
     accept-count: ${SERVER_TOMCAT_ACCEPT_COUNT:100}
-      # 使得TLD扫描忽略的正则表达式列表
-      #additional-tld-skip-patterns:
-      # 静态资源配置
-      #resource:
+    # 使得TLD扫描忽略的正则表达式列表
+    #additional-tld-skip-patterns:
+    # 静态资源配置
+    #resource:
       # 静态资源缓存的存活时间，超时清除
-    #cache-ttl:
+      #cache-ttl:
 
 feign:
   hystrix:

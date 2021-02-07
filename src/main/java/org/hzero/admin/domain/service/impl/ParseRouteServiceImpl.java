@@ -3,6 +3,7 @@ package org.hzero.admin.domain.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.choerodon.core.exception.CommonException;
+import io.choerodon.core.oauth.DetailsHelper;
 import io.choerodon.core.swagger.ChoerodonRouteData;
 import org.apache.commons.lang3.StringUtils;
 import org.hzero.admin.app.service.ServiceRouteRefreshService;
@@ -28,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.data.redis.core.BoundHashOperations;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.remoting.RemoteAccessException;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
@@ -89,6 +91,12 @@ public class ParseRouteServiceImpl implements ParseRouteService {
     @PostConstruct
     @Override
     public void init() {
+        httpTransporter.configure(restTemplate -> {
+            SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+            requestFactory.setConnectTimeout(3000);
+            requestFactory.setReadTimeout(6000);
+            restTemplate.setRequestFactory(requestFactory);
+        });
         scheduler.scheduleAtFixedRate(() -> {
             boolean isGet = false;
             FunctionX task = taskQueue.poll();
@@ -290,7 +298,11 @@ public class ParseRouteServiceImpl implements ParseRouteService {
     private void refreshRouteMapInCache(List<ChoerodonRouteData> dataList, String serviceName) {
         for (ChoerodonRouteData routeData : dataList){
             BoundHashOperations<String, String, String> hashOperations = redisHelper.getRedisTemplate().boundHashOps(ROUTE_MAP_KEY);
-            hashOperations.putIfAbsent(resolveServiceCode(routeData.getPath()), serviceName);
+            if (DetailsHelper.getUserDetails() != null && DetailsHelper.getUserDetails().getUserId() != null) {
+                hashOperations.put(resolveServiceCode(routeData.getPath()), serviceName);
+            } else {
+                hashOperations.putIfAbsent(resolveServiceCode(routeData.getPath()), serviceName);
+            }
         }
     }
 

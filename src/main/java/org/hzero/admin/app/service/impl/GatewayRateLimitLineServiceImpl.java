@@ -5,7 +5,6 @@ import io.choerodon.core.exception.CommonException;
 import io.choerodon.mybatis.pagehelper.domain.PageRequest;
 import org.hzero.admin.api.dto.GatewayRateLimitLineDto;
 import org.hzero.admin.app.service.GatewayRateLimitLineService;
-import org.hzero.admin.app.service.GatewayRateLimitService;
 import org.hzero.admin.app.service.ServiceRouteRefreshService;
 import org.hzero.admin.domain.entity.GatewayRateLimitDimension;
 import org.hzero.admin.domain.entity.GatewayRateLimitLine;
@@ -15,6 +14,7 @@ import org.hzero.admin.domain.repository.GatewayRateLimitLineRepository;
 import org.hzero.admin.domain.repository.ServiceRouteRepository;
 import org.hzero.boot.platform.lov.annotation.ProcessLovValue;
 import org.hzero.core.base.BaseAppService;
+import org.hzero.core.base.BaseConstants;
 import org.hzero.mybatis.helper.SecurityTokenHelper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,8 +24,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static org.hzero.admin.app.service.GatewayRateLimitService.RATE_LIMITER_FILTER_NAME;
 
 /**
  * 网关限流设置行明细应用服务默认实现
@@ -90,7 +93,7 @@ public class GatewayRateLimitLineServiceImpl extends BaseAppService implements G
         }
         Long routeId = line.getServiceRouteId();
         ServiceRoute route = serviceRouteRepository.selectByPrimaryKey(routeId);
-        if(route == null){
+        if (route == null) {
             line.setPath("无效路由");
         } else {
             line.setPath(route.getPath());
@@ -104,7 +107,7 @@ public class GatewayRateLimitLineServiceImpl extends BaseAppService implements G
 
         int count = gatewayRateLimitLineRepository.batchDelete(gatewayRateLimitLines);
         routeRefreshService.removeRouteExtendConfigAndNotifyGateway(
-                GatewayRateLimitService.RATE_LIMITER_FILTER_NAME,
+                RATE_LIMITER_FILTER_NAME,
                 gatewayRateLimitLines.stream()
                         .map(GatewayRateLimitLine::getServiceRouteId)
                         .collect(Collectors.toList()));
@@ -116,7 +119,7 @@ public class GatewayRateLimitLineServiceImpl extends BaseAppService implements G
         GatewayRateLimitDimension queryParam = new GatewayRateLimitDimension();
         queryParam.setRateLimitLineId(rateLimitLineId);
         int count = gatewayRateLimitDimensionRepository.selectCount(queryParam);
-        if (count == 0){
+        if (count == 0) {
             return true;
         }
         return false;
@@ -135,7 +138,7 @@ public class GatewayRateLimitLineServiceImpl extends BaseAppService implements G
         GatewayRateLimitDimension queryParam = new GatewayRateLimitDimension();
         queryParam.setRateLimitLineId(rateLimitLine.getRateLimitLineId());
         int count = gatewayRateLimitDimensionRepository.selectCount(queryParam);
-        if (count == 0){
+        if (count == 0) {
             return true;
         }
         return false;
@@ -155,8 +158,13 @@ public class GatewayRateLimitLineServiceImpl extends BaseAppService implements G
     public GatewayRateLimitLine updateByPrimaryKey(GatewayRateLimitLine gatewayRateLimitLine) {
         this.validObject(gatewayRateLimitLine);
         SecurityTokenHelper.validToken(gatewayRateLimitLine);
-        if (!allowChange(gatewayRateLimitLine)){
+        if (!allowChange(gatewayRateLimitLine)) {
             throw new CommonException("hadm.error.dimension_exists");
+        }
+        if (BaseConstants.Flag.NO.equals(gatewayRateLimitLine.getEnabledFlag())) {
+            // 禁用就移除路由配置
+            routeRefreshService.removeRouteExtendConfigAndNotifyGateway(RATE_LIMITER_FILTER_NAME,
+                    Collections.singletonList(gatewayRateLimitLine.getServiceRouteId()));
         }
         gatewayRateLimitLineRepository.updateByPrimaryKeySelective(gatewayRateLimitLine);
         return gatewayRateLimitLine;
@@ -164,7 +172,7 @@ public class GatewayRateLimitLineServiceImpl extends BaseAppService implements G
 
     @Override
     public List<GatewayRateLimitLine> batchUpdateByPrimaryKey(List<GatewayRateLimitLine> gatewayRateLimitLines) {
-        if (!allowChange(gatewayRateLimitLines)){
+        if (!allowChange(gatewayRateLimitLines)) {
             throw new CommonException("hadm.error.dimension_exists");
         }
         return gatewayRateLimitLineRepository.batchUpdateByPrimaryKey(gatewayRateLimitLines);

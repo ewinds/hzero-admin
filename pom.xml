@@ -6,11 +6,11 @@
     <parent>
         <groupId>org.hzero</groupId>
         <artifactId>hzero-parent</artifactId>
-        <version>1.4.0.RELEASE</version>
+        <version>1.5.4.RELEASE</version>
     </parent>
     <artifactId>hzero-admin-saas</artifactId>
+    <version>1.5.3.RELEASE</version>
     <name>hzero-admin-saas</name>
-    <version>1.4.3.RELEASE</version>
 
     <dependencies>
         <!-- hzero starter -->

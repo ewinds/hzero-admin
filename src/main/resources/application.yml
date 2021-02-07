@@ -16,7 +16,7 @@ spring:
     host: ${SPRING_REDIS_HOST:redis.hzero.org}
     port: ${SPRING_REDIS_PORT:6379}
     database: ${SPRING_REDIS_DATABASE:1}
-    jedis:
+    lettuce:
       pool:
         # 资源池中最大连接数
         # 默认8，-1表示无限制；可根据服务并发redis情况及服务端的支持上限调整
@@ -34,8 +34,17 @@ spring:
     chain.gzipped: true
     # 启用缓存
     chain.cache: true
-
-server: 
+  boot:
+    admin:
+      context-path: /admin-server
+      client:
+        username: ${SPRING_BOOT_ADMIN_CLIENT_USERNAME:admin}
+        password: ${SPRING_BOOT_ADMIN_CLIENT_PASSWORD:admin}
+  security:
+    user:
+      name: ${SPRING_SECURITY_USER_NAME:admin}
+      password: ${SPRING_SECURITY_USER_PASSWORD:admin}
+server:
   undertow:
     # 设置IO线程数, 它主要执行非阻塞的任务,它们会负责多个连接
     # 默认值为8，建议设置每个CPU核心一个线程
@@ -53,52 +62,6 @@ server:
     # 默认0，无限制，可设置10M
     max-http-post-size: 10485760
     allow-unescaped-characters-in-url: true
-  jetty:
-    # HTTP post/put 内容字节限制值
-    max-http-post-size: ${SERVER_JETTY_MAX_HTTP_POST_SIZE:200000}
-    # 接受器线程数，-1表示由操作环境决定
-    acceptors: ${SERVER_JETTY_ACCEPTORS:-1}
-    # 选择器线程数，-1表示由操作环境决定
-    selectors: ${SERVER_JETTY_SELECTORS:-1}
-  tomcat:
-    # 允许的代理ip的正则表达式
-    #internal-proxies:
-    # 协议头，通常为X-Forwarded-Proto
-    protocol-header: X-Forwarded-Proto
-    # 当协议头为xxx值时，认为需要使用ssl，通常为https
-    protocol-header-https-value: https
-    # 端口头，通常为X-Forwarded-Port
-    port-header: X-Forwarded-Port
-    # 远程ip头，通常为X-Forwarded-For
-    remote-ip-header: X-Forwarded-For
-    # tomcat基本目录，不指定时使用临时文件夹
-    #basedir:
-    # 后台处理器的延时时长，默认为10s
-    background-processor-delay: 10s
-    # 工作线程的最大数量，默认200
-    max-threads: ${SERVER_TOMCAT_MAX_THREADS:200}
-    # 工作线程的最小数量，默认10
-    min-spare-threads: 10
-    # HTTP post请求内容字节限制，默认2097152
-    max-http-post-size: ${SERVER_TOMCAT_MAX_HTTP_POST_SIZE:2097152}
-    # HTTP 请求头字节限制，默认0，表示使用web容器的默认限制值
-    max-http-header-size: 0
-    # 是否要对重定向到上下文根的请求路径上添加/，默认true
-    redirect-context-root: true
-    # 重定向是否使用相对路径
-    #use-relative-redirects: false
-    # URI的解码字符集
-    uri-encoding: UTF-8
-    # 最大连接数，当连接数达到限制，请求会被阻塞到队列，队列大小由accept-count属性决定
-    max-connections: ${SERVER_TOMCAT_MAX_CONNECTIONS:10000}
-    # 阻塞队列大小
-    accept-count: ${SERVER_TOMCAT_ACCEPT_COUNT:100}
-    # 使得TLD扫描忽略的正则表达式列表
-    #additional-tld-skip-patterns:
-    # 静态资源配置
-    #resource:
-      # 静态资源缓存的存活时间，超时清除
-      #cache-ttl:
 
 feign:
   hystrix:
@@ -109,9 +72,11 @@ hystrix:
     default:
       # 执行命令线程池的核心线程数，也是命令执行的最大并发量
       # 默认10
-      coreSize: 1000
+      coreSize: 100
       # 最大执行线程数
-      maximumSize: 1000
+      maximumSize: 200
+      maxQueueSize: 1000
+      queueSizeRejectionThreshold: 1000
   command:
     default:
       execution:
@@ -148,6 +113,7 @@ hzero:
       db-owner: ${HZERO_DB_OWNER:}
   config:
     route:
+      # 跳过解析权限的服务
       skip-parse-services: register, gateway, oauth
   # 开启metric同步功能，开启后会收集网关的api请求情况信息并写入db
   metric:
@@ -157,6 +123,18 @@ hzero:
   trace:
     redis-reporter:
       enable: ${HZERO_TRACE_REDIS_REPORTER_ENABLE:false}
+  service-init-registry:
+    skip-expression: "#service.serviceName=='hzero-config'||#service.serviceName=='hzero-oauth'"
+    health-check:
+      connect-timeout: 3000
+      read-timeout: 6000
+  market:
+    server:
+      enable: ${HZERO_MARKET_SERVER_ENABLE:false}
+      host: ${HZERO_MARKET_SERVER_HOST:http://hzerodevb.saas.hand-china.com}
+      login:
+        clientId: ${HZERO_MARKET_SERVER_LOGIN_CLIENTID:client}
+        clientSecret: ${HZERO_MARKET_SERVER_LOGIN_SECRET:secret}
 
 logging:
   level:

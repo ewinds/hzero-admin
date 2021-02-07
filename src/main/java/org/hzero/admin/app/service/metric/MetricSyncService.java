@@ -102,7 +102,7 @@ public class MetricSyncService {
     private ApiMonitor createApiMonitor(String key, MetricMap.RequestCount requestCount){
         ApiMonitor apiMonitor = new ApiMonitor();
         String[] parts = key.split("::");
-        Assert.isTrue(parts.length >= 3, "hadm.error.createApiMonitor");
+        Assert.isTrue(parts.length >= 3, "hadm.error.create_api_monitor");
         apiMonitor.setMonitorRuleId(Long.valueOf(parts[0]));
         apiMonitor.setMonitorUrl(parts[1]);
         apiMonitor.setMonitorKey(parts[2]);
